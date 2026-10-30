@@ -1,7 +1,7 @@
 # One image definition for every MyClawd service.
 # Build the jars first (`mvn -B package`), then:
 #   docker build -f docker/service.Dockerfile --build-arg SERVICE=work-order-service -t myclawd/work-order-service .
-FROM eclipse-temurin:21-jre-noble
+FROM eclipse-temurin:24-jre-noble
 
 ARG SERVICE
 RUN test -n "$SERVICE" || (echo "Pass --build-arg SERVICE=<module folder name>" && false)
