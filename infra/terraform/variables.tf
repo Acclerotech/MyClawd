@@ -60,7 +60,7 @@ variable "budget_alert_emails" {
 }
 
 variable "tags" {
-  type    = map(string)
+  type = map(string)
   default = {
     product   = "MyClawd"
     managedBy = "terraform"
