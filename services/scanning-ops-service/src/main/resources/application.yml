@@ -1,0 +1,39 @@
+server:
+  port: ${PORT:8088}
+
+spring:
+  application:
+    name: scanning-ops-service
+  datasource:
+    # One MySQL server, one schema per service (Dev Principle 4). The schema is this service's alone.
+    url: ${DB_URL:jdbc:mysql://localhost:3306/scanning_ops?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true}
+    username: ${DB_USERNAME:myclawd}
+    password: ${DB_PASSWORD:myclawd}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none   # Flyway owns the schema
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /api/scanning-ops/v3/api-docs
+  swagger-ui:
+    path: /api/scanning-ops/swagger-ui.html
+
+myclawd:
+  audit:
+    service-url: ${AUDIT_SERVICE_URL:http://localhost:8082}

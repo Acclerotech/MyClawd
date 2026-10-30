@@ -1,0 +1,112 @@
+name: Deploy to Azure (Dev+QA)
+
+# Runs after CI passes on main, or by hand. Builds one image per service, pushes it to the
+# environment's container registry, then rolls every container app to that image tag.
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC federation with Entra ID - no Azure secrets stored in GitHub
+  contents: read
+
+concurrency:
+  group: deploy-devqa
+  cancel-in-progress: false
+
+env:
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: "true"
+  TF_IN_AUTOMATION: "true"
+  TF_VARS: -var-file=envs/devqa.tfvars
+
+jobs:
+  deploy:
+    # Skips quietly until the Azure variables are configured (docs/azure-setup.md).
+    if: >
+      vars.AZURE_CLIENT_ID != '' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    environment: devqa
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Image tag
+        id: tag
+        run: echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: >
+          terraform init
+          -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}"
+          -backend-config="key=myclawd-devqa.tfstate"
+          -backend-config="use_oidc=true"
+          -backend-config="use_azuread_auth=true"
+
+      # First run only: create the registry, database and environment before any image exists.
+      - name: Bootstrap core infrastructure (first run)
+        working-directory: infra/terraform
+        run: |
+          if ! terraform state list | grep -q '^azurerm_container_registry.acr$'; then
+            terraform apply -auto-approve $TF_VARS -var deploy_apps=false
+          fi
+
+      - name: Registry name
+        id: acr
+        working-directory: infra/terraform
+        run: echo "name=$(terraform output -raw acr_name)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Package services
+        run: mvn -B -ntp -DskipTests package
+
+      - name: Build and push images
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          ACR: ${{ steps.acr.outputs.name }}
+        run: |
+          az acr login --name "$ACR"
+          REGISTRY="$ACR.azurecr.io/myclawd"
+          for dir in services/*/; do
+            svc=$(basename "$dir")
+            docker build -f docker/service.Dockerfile --build-arg SERVICE="$svc" -t "$REGISTRY/$svc:$TAG" .
+            docker push "$REGISTRY/$svc:$TAG"
+          done
+          docker build -t "$REGISTRY/web:$TAG" web
+          docker push "$REGISTRY/web:$TAG"
+
+      - name: Deploy container apps
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve $TF_VARS -var image_tag=${{ steps.tag.outputs.tag }}
+
+      - name: URLs
+        working-directory: infra/terraform
+        run: |
+          echo "### Deployed ${{ steps.tag.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Web: $(terraform output -raw web_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API gateway: $(terraform output -raw gateway_url)" >> "$GITHUB_STEP_SUMMARY"

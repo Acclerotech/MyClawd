@@ -1,0 +1,22 @@
+{
+  "app": { "name": "MyClawd" },
+  "nav": {
+    "uniksign": "UnikSign",
+    "docutrail": "DocuTrail",
+    "dashboard": "Tableau de bord",
+    "workOrders": "Ordres de travail",
+    "entityProfile": "Profil de l'entité",
+    "trustAudit": "Confiance et audit"
+  },
+  "language": { "toggle": "English" },
+  "dashboard": { "title": "Tableau de bord", "empty": "Les panneaux du tableau de bord arrivent à la phase P5." },
+  "workOrders": {
+    "title": "Ordres de travail",
+    "reference": "Référence",
+    "step": "Étape",
+    "stepOf": "Étape {{step}} sur 7",
+    "created": "Créé",
+    "loadError": "Impossible de charger les ordres de travail."
+  },
+  "placeholder": "Cet écran sera construit dans une phase ultérieure."
+}

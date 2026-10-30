@@ -1,0 +1,22 @@
+{
+  "app": { "name": "MyClawd" },
+  "nav": {
+    "uniksign": "UnikSign",
+    "docutrail": "DocuTrail",
+    "dashboard": "Dashboard",
+    "workOrders": "Work Orders",
+    "entityProfile": "Entity Profile",
+    "trustAudit": "Trust & Audit"
+  },
+  "language": { "toggle": "Français" },
+  "dashboard": { "title": "Dashboard", "empty": "Dashboard panels arrive in phase P5." },
+  "workOrders": {
+    "title": "Work Orders",
+    "reference": "Reference",
+    "step": "Step",
+    "stepOf": "Step {{step}} of 7",
+    "created": "Created",
+    "loadError": "Could not load work orders."
+  },
+  "placeholder": "This screen is built in a later phase."
+}

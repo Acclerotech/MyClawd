@@ -1,0 +1,202 @@
+# Local Dev stack: MySQL 8.4 + all 12 services.
+#   mvn -B package -DskipTests
+#   docker compose up --build
+# Web app: http://localhost:5173   Gateway: http://localhost:8080   (e.g. GET http://localhost:8080/api/work-order/work-orders)
+name: myclawd
+
+x-service: &service
+  restart: unless-stopped
+  depends_on:
+    mysql:
+      condition: service_healthy
+  environment: &service-env
+    PORT: "8080"
+    DB_USERNAME: myclawd
+    DB_PASSWORD: myclawd
+    AUDIT_SERVICE_URL: http://audit-service:8080
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: myclawd
+      MYSQL_PASSWORD: myclawd
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build:
+      context: ./web
+    ports:
+      - "5173:8080"   # http://localhost:5173
+    environment:
+      GATEWAY_URL: http://api-gateway:8080
+    depends_on:
+      - api-gateway
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      IDENTITY_SERVICE_URL: http://identity-service:8080
+      AUDIT_SERVICE_URL: http://audit-service:8080
+      ENTITY_TRUST_SERVICE_URL: http://entity-trust-service:8080
+      REGISTRATION_AUTHORITY_SERVICE_URL: http://registration-authority-service:8080
+      SIGNATURE_SERVICE_URL: http://signature-service:8080
+      LEGAL_CONSENT_SERVICE_URL: http://legal-consent-service:8080
+      WORK_ORDER_SERVICE_URL: http://work-order-service:8080
+      SCANNING_OPS_SERVICE_URL: http://scanning-ops-service:8080
+      DOCUMENTS_TRANSFER_SERVICE_URL: http://documents-transfer-service:8080
+      REPORTS_SERVICE_URL: http://reports-service:8080
+      DASHBOARD_NOTIFICATIONS_SERVICE_URL: http://dashboard-notifications-service:8080
+    depends_on:
+      - identity-service
+      - audit-service
+      - entity-trust-service
+      - registration-authority-service
+      - signature-service
+      - legal-consent-service
+      - work-order-service
+      - scanning-ops-service
+      - documents-transfer-service
+      - reports-service
+      - dashboard-notifications-service
+
+  identity-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: identity-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/identity?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  audit-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: audit-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/audit?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  entity-trust-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: entity-trust-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/entity_trust?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  registration-authority-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: registration-authority-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/registration_authority?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  signature-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: signature-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/signature?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  legal-consent-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: legal-consent-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/legal_consent?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  work-order-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: work-order-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/work_order?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  scanning-ops-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: scanning-ops-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/scanning_ops?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  documents-transfer-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: documents-transfer-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/documents_transfer?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  reports-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: reports-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/reports?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+  dashboard-notifications-service:
+    <<: *service
+    build:
+      context: .
+      dockerfile: docker/service.Dockerfile
+      args:
+        SERVICE: dashboard-notifications-service
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/dashboard?createDatabaseIfNotExist=true&sslMode=DISABLED&allowPublicKeyRetrieval=true
+
+volumes:
+  mysql-data:

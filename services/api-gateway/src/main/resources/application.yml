@@ -1,0 +1,68 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          # One route per service. In Azure each URL is the service's internal Container Apps
+          # address (http://<app-name>); locally docker-compose sets them.
+          # TODO (P1): validate Entra ID / Entra External ID tokens here and forward the caller.
+          routes:
+            - id: identity
+              uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/identity/**
+            - id: audit
+              uri: ${AUDIT_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/audit/**
+            - id: entity-trust
+              uri: ${ENTITY_TRUST_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/entity-trust/**
+            - id: registration-authority
+              uri: ${REGISTRATION_AUTHORITY_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/registration-authority/**
+            - id: signature
+              uri: ${SIGNATURE_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/api/signature/**
+            - id: legal-consent
+              uri: ${LEGAL_CONSENT_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/api/legal-consent/**
+            - id: work-order
+              uri: ${WORK_ORDER_SERVICE_URL:http://localhost:8087}
+              predicates:
+                - Path=/api/work-order/**
+            - id: scanning-ops
+              uri: ${SCANNING_OPS_SERVICE_URL:http://localhost:8088}
+              predicates:
+                - Path=/api/scanning-ops/**
+            - id: documents-transfer
+              uri: ${DOCUMENTS_TRANSFER_SERVICE_URL:http://localhost:8089}
+              predicates:
+                - Path=/api/documents-transfer/**
+            - id: reports
+              uri: ${REPORTS_SERVICE_URL:http://localhost:8090}
+              predicates:
+                - Path=/api/reports/**
+            - id: dashboard-notifications
+              uri: ${DASHBOARD_NOTIFICATIONS_SERVICE_URL:http://localhost:8091}
+              predicates:
+                - Path=/api/dashboard-notifications/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
