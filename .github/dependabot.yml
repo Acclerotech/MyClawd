@@ -15,6 +15,18 @@ updates:
   - package-ecosystem: docker
     directories: ["/docker", "/web"]
     schedule: { interval: weekly }
+    ignore:
+      # Stay on LTS runtimes: Java 21 (Tech Stack) and Node 22. Major moves are a deliberate decision.
+      - dependency-name: eclipse-temurin
+        update-types: ["version-update:semver-major"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: terraform
     directory: /infra/terraform
     schedule: { interval: weekly }
+    ignore:
+      # Provider major versions carry breaking changes; upgrade on purpose, not by bot.
+      - dependency-name: hashicorp/azurerm
+        update-types: ["version-update:semver-major"]
+      - dependency-name: Azure/azapi
+        update-types: ["version-update:semver-major"]
