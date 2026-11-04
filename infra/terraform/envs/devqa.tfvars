@@ -1,9 +1,9 @@
 # Shared Dev+QA environment (Procurement Handover: one non-production environment).
 environment = "devqa"
 
-# REGION - CONFIRM BEFORE FIRST APPLY. Procurement Handover v1.2 / Build Plan v1.1 say
-# Canada Central; the infrastructure is also being discussed for Quebec (Canada East).
-location = "canadacentral"
+# Region confirmed 2026-11-04: Canada East (Quebec). Changing it after the first apply
+# means rebuilding the environment.
+location = "canadaeast"
 
 app_min_replicas    = 0
 monthly_budget_usd  = 230

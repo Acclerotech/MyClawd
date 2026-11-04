@@ -1,14 +1,25 @@
 # Azure setup (one time)
 
-The deploy workflow needs four things that Terraform cannot create for itself: a place to keep its state, an identity GitHub can sign in as, permission for that identity, and six GitHub variables. Run these once with the Azure CLI as someone who can create role assignments on the subscription.
+The deploy workflow needs four things that Terraform cannot create for itself: a place to keep its state, an identity GitHub can sign in as, permission for that identity, and six GitHub variables.
 
-> **Region:** `infra/terraform/envs/devqa.tfvars` is set to `canadacentral`, as in the Procurement Handover v1.2 and Build Plan v1.1. Change it to `canadaeast` before the first deploy if the Dev+QA environment is going to Quebec. Changing it later means rebuilding the environment.
+> **Region:** Canada East (Quebec), set in `infra/terraform/envs/devqa.tfvars`. Changing it after the first deploy means rebuilding the environment.
+
+## Quick way: one script
+
+Open **Azure Cloud Shell** (portal.azure.com → the `>_` icon → **Bash**) signed in as a **subscription Owner**, then:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Acclerotech/MyClawd/main/scripts/azure-bootstrap.sh -o bootstrap.sh
+bash bootstrap.sh <subscription-id>
+```
+
+It does steps 1–3 below (plus registering resource providers and checking the region), is safe to re-run, and prints the exact values for step 4. The manual steps are kept for reference.
 
 ## 1. Terraform state storage
 
 ```bash
 SUB=<subscription-id>
-LOC=canadacentral
+LOC=canadaeast
 az account set --subscription $SUB
 
 az group create -n rg-myclawd-tfstate -l $LOC
