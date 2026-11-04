@@ -26,6 +26,8 @@ say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 say "Using subscription $SUB, region $LOCATION, repository $REPO"
 az account set --subscription "$SUB"
+# Accept a subscription name too, but always work with (and print) its GUID.
+SUB=$(az account show --query id -o tsv)
 TENANT=$(az account show --query tenantId -o tsv)
 az account show --query "{name:name, state:state}" -o table
 
@@ -60,8 +62,10 @@ fi
 
 say "3/6 Terraform state storage"
 az group create -n "$STATE_RG" -l "$LOCATION" -o none
-# Storage account names are global: derive a stable one from the subscription id.
-SA="stmyclawdtf$(echo -n "$SUB" | sha1sum | cut -c1-10)"
+# Storage account names are global. Reuse the one from an earlier run if it exists,
+# otherwise derive a stable name from the subscription id.
+SA=$(az storage account list -g "$STATE_RG" --query "[?starts_with(name,'stmyclawdtf')].name | [0]" -o tsv)
+[[ -n "$SA" ]] || SA="stmyclawdtf$(echo -n "$SUB" | sha1sum | cut -c1-10)"
 if ! az storage account show -n "$SA" -g "$STATE_RG" -o none 2>/dev/null; then
   az storage account create -n "$SA" -g "$STATE_RG" -l "$LOCATION" --sku Standard_LRS \
     --kind StorageV2 --min-tls-version TLS1_2 --allow-blob-public-access false \
@@ -100,12 +104,25 @@ echo "  $APP_NAME ($APP_ID) trusts $SUBJECT"
 
 say "5/6 Permissions for the deploy identity"
 assign() {
-  az role assignment create --assignee-object-id "$SP_ID" --assignee-principal-type ServicePrincipal \
-    --role "$1" --scope "$2" -o none 2>/dev/null && echo "  $1" || echo "  $1 (already assigned)"
+  if [[ -n "$(az role assignment list --assignee "$SP_ID" --role "$1" --scope "$2" --query "[0].id" -o tsv)" ]]; then
+    echo "  $1 (already assigned)"
+  else
+    az role assignment create --assignee-object-id "$SP_ID" --assignee-principal-type ServicePrincipal \
+      --role "$1" --scope "$2" -o none
+    echo "  $1 (assigned)"
+  fi
 }
 assign "Contributor" "/subscriptions/$SUB"
 assign "Role Based Access Control Administrator" "/subscriptions/$SUB"
 assign "Storage Blob Data Contributor" "$SA_ID"
+
+say "Checking the deploy identity's permissions"
+for role in "Contributor" "Role Based Access Control Administrator"; do
+  if [[ -z "$(az role assignment list --assignee "$SP_ID" --role "$role" --scope "/subscriptions/$SUB" --query "[0].id" -o tsv)" ]]; then
+    echo "  MISSING: $role on the subscription - are you signed in as a subscription Owner?"; exit 1
+  fi
+  echo "  ok: $role"
+done
 
 say "6/6 Add these to GitHub"
 cat <<EOF
