@@ -10,7 +10,8 @@
 #   2. checks the region offers Container Apps and MySQL Flexible Server
 #   3. creates the Terraform state storage
 #   4. creates the identity GitHub Actions signs in as (OIDC - no secrets stored in GitHub)
-#   5. gives that identity the permissions Terraform needs
+#   5. creates the Dev+QA resource group and the apps' identity, and grants every permission
+#      (the deploy identity gets Contributor only - it can never grant access itself)
 #   6. prints the six GitHub variables to add
 set -euo pipefail
 
@@ -18,6 +19,8 @@ SUB="${1:?Usage: bash azure-bootstrap.sh <subscription-id> [location] [owner/rep
 LOCATION="${2:-canadaeast}"
 REPO="${3:-Acclerotech/MyClawd}"
 GH_ENV="devqa"
+APP_RG="rg-myclawd-devqa"            # must match infra/terraform (rg-<name_prefix>-<environment>)
+APPS_IDENTITY="id-myclawd-devqa-apps"
 STATE_RG="rg-myclawd-tfstate"
 STATE_CONTAINER="tfstate"
 APP_NAME="github-myclawd-deploy"
@@ -102,27 +105,43 @@ if ! az ad app federated-credential list --id "$APP_ID" --query "[?subject=='$SU
 fi
 echo "  $APP_NAME ($APP_ID) trusts $SUBJECT"
 
-say "5/6 Permissions for the deploy identity"
-assign() {
-  if [[ -n "$(az role assignment list --assignee "$SP_ID" --role "$1" --scope "$2" --query "[0].id" -o tsv)" ]]; then
-    echo "  $1 (already assigned)"
+say "5/6 Resource group, app identity and permissions"
+az group create -n "$APP_RG" -l "$LOCATION" --tags product=MyClawd managedBy=bootstrap -o none
+RG_ID=$(az group show -n "$APP_RG" --query id -o tsv)
+az identity show -n "$APPS_IDENTITY" -g "$APP_RG" -o none 2>/dev/null \
+  || az identity create -n "$APPS_IDENTITY" -g "$APP_RG" -l "$LOCATION" -o none
+APPS_PID=$(az identity show -n "$APPS_IDENTITY" -g "$APP_RG" --query principalId -o tsv)
+echo "  $APP_RG and $APPS_IDENTITY ready"
+
+has_role() { [[ -n "$(az role assignment list --assignee "$1" --role "$2" --scope "$3" --query "[0].id" -o tsv)" ]]; }
+assign() { # <principal-object-id> <principal-type> <role> <scope> <label>
+  if has_role "$1" "$3" "$4"; then
+    echo "  $5: $3 (already assigned)"
   else
-    az role assignment create --assignee-object-id "$SP_ID" --assignee-principal-type ServicePrincipal \
-      --role "$1" --scope "$2" -o none
-    echo "  $1 (assigned)"
+    for i in 1 2 3 4 5 6; do   # a new identity can take a minute to be visible to role assignment
+      az role assignment create --assignee-object-id "$1" --assignee-principal-type "$2" \
+        --role "$3" --scope "$4" -o none 2>/dev/null && break
+      [[ $i -eq 6 ]] && { az role assignment create --assignee-object-id "$1" --assignee-principal-type "$2" --role "$3" --scope "$4" -o none; exit 1; }
+      sleep 15
+    done
+    echo "  $5: $3 (assigned)"
   fi
 }
-assign "Contributor" "/subscriptions/$SUB"
-assign "Role Based Access Control Administrator" "/subscriptions/$SUB"
-assign "Storage Blob Data Contributor" "$SA_ID"
+assign "$SP_ID"    ServicePrincipal "Contributor"                   "/subscriptions/$SUB" "deploy identity"
+assign "$SP_ID"    ServicePrincipal "Storage Blob Data Contributor" "$SA_ID"              "deploy identity"
+assign "$SP_ID"    ServicePrincipal "Key Vault Secrets Officer"     "$RG_ID"              "deploy identity"
+assign "$APPS_PID" ServicePrincipal "AcrPull"                       "$RG_ID"              "apps identity"
+assign "$APPS_PID" ServicePrincipal "Key Vault Secrets User"        "$RG_ID"              "apps identity"
 
-say "Checking the deploy identity's permissions"
-for role in "Contributor" "Role Based Access Control Administrator"; do
-  if [[ -z "$(az role assignment list --assignee "$SP_ID" --role "$role" --scope "/subscriptions/$SUB" --query "[0].id" -o tsv)" ]]; then
-    echo "  MISSING: $role on the subscription - are you signed in as a subscription Owner?"; exit 1
-  fi
-  echo "  ok: $role"
-done
+say "Checking the permissions"
+check() {
+  if has_role "$1" "$2" "$3"; then echo "  ok: $4 - $2"; else echo "  MISSING: $4 - $2"; exit 1; fi
+}
+check "$SP_ID"    "Contributor"                   "/subscriptions/$SUB" "deploy identity"
+check "$SP_ID"    "Storage Blob Data Contributor" "$SA_ID"              "deploy identity"
+check "$SP_ID"    "Key Vault Secrets Officer"     "$RG_ID"              "deploy identity"
+check "$APPS_PID" "AcrPull"                       "$RG_ID"              "apps identity"
+check "$APPS_PID" "Key Vault Secrets User"        "$RG_ID"              "apps identity"
 
 say "6/6 Add these to GitHub"
 cat <<EOF

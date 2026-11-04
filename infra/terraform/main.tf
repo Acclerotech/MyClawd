@@ -15,43 +15,37 @@ locals {
 # Resource group, logging, registry, identity
 # ---------------------------------------------------------------------------
 
-resource "azurerm_resource_group" "rg" {
-  name     = "rg-${local.base}"
-  location = var.location
-  tags     = var.tags
+# The resource group, the apps' identity and every role assignment are created once by
+# scripts/azure-bootstrap.sh (run by a subscription Owner). That way the deploy identity
+# only needs Contributor and never has the right to grant access.
+data "azurerm_resource_group" "rg" {
+  name = "rg-${local.base}"
 }
 
 resource "azurerm_log_analytics_workspace" "logs" {
   name                = "log-${local.base}"
   location            = var.location
-  resource_group_name = azurerm_resource_group.rg.name
+  resource_group_name = data.azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
-  daily_quota_gb      = 1 # capped ingestion (Tech Stack: observability)
+  daily_quota_gb      = 0.3 # capped ingestion: at most ~9 GB/month (Procurement line $30)
   tags                = var.tags
 }
 
 resource "azurerm_container_registry" "acr" {
   name                = "acr${var.name_prefix}${var.environment}${local.suffix}"
   location            = var.location
-  resource_group_name = azurerm_resource_group.rg.name
+  resource_group_name = data.azurerm_resource_group.rg.name
   sku                 = "Basic"
   admin_enabled       = false
   tags                = var.tags
 }
 
-# One identity the apps use to pull images and read Key Vault secrets.
-resource "azurerm_user_assigned_identity" "apps" {
+# One identity the apps use to pull images and read Key Vault secrets
+# (AcrPull and Key Vault Secrets User on the resource group, granted by the bootstrap script).
+data "azurerm_user_assigned_identity" "apps" {
   name                = "id-${local.base}-apps"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.rg.name
-  tags                = var.tags
-}
-
-resource "azurerm_role_assignment" "apps_acr_pull" {
-  scope                = azurerm_container_registry.acr.id
-  role_definition_name = "AcrPull"
-  principal_id         = azurerm_user_assigned_identity.apps.principal_id
+  resource_group_name = data.azurerm_resource_group.rg.name
 }
 
 # ---------------------------------------------------------------------------
@@ -61,25 +55,13 @@ resource "azurerm_role_assignment" "apps_acr_pull" {
 resource "azurerm_key_vault" "kv" {
   name                       = "kv-${var.name_prefix}-${var.environment}-${local.suffix}"
   location                   = var.location
-  resource_group_name        = azurerm_resource_group.rg.name
+  resource_group_name        = data.azurerm_resource_group.rg.name
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = "premium"
   rbac_authorization_enabled = true
   purge_protection_enabled   = false
   soft_delete_retention_days = 7
   tags                       = var.tags
-}
-
-resource "azurerm_role_assignment" "deployer_kv_secrets" {
-  scope                = azurerm_key_vault.kv.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
-
-resource "azurerm_role_assignment" "apps_kv_secrets" {
-  scope                = azurerm_key_vault.kv.id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.apps.principal_id
 }
 
 resource "random_password" "mysql" {
@@ -92,7 +74,6 @@ resource "azurerm_key_vault_secret" "mysql_password" {
   name         = "mysql-admin-password"
   value        = random_password.mysql.result
   key_vault_id = azurerm_key_vault.kv.id
-  depends_on   = [azurerm_role_assignment.deployer_kv_secrets]
 }
 
 # ---------------------------------------------------------------------------
@@ -103,7 +84,7 @@ resource "azurerm_key_vault_secret" "mysql_password" {
 resource "azapi_resource" "mysql" {
   type                      = "Microsoft.DBforMySQL/flexibleServers@2023-12-30"
   name                      = "mysql-${local.base}-${local.suffix}"
-  parent_id                 = azurerm_resource_group.rg.id
+  parent_id                 = data.azurerm_resource_group.rg.id
   location                  = var.location
   schema_validation_enabled = false
   tags                      = var.tags
@@ -146,7 +127,7 @@ locals {
 # Before production: private networking (VNet-integrated environment + private endpoint).
 resource "azurerm_mysql_flexible_server_firewall_rule" "azure_services" {
   name                = "allow-azure-services"
-  resource_group_name = azurerm_resource_group.rg.name
+  resource_group_name = data.azurerm_resource_group.rg.name
   server_name         = azapi_resource.mysql.name
   start_ip_address    = "0.0.0.0"
   end_ip_address      = "0.0.0.0"
@@ -155,7 +136,7 @@ resource "azurerm_mysql_flexible_server_firewall_rule" "azure_services" {
 resource "azurerm_mysql_flexible_database" "schema" {
   for_each            = local.domain_services
   name                = each.value.schema
-  resource_group_name = azurerm_resource_group.rg.name
+  resource_group_name = data.azurerm_resource_group.rg.name
   server_name         = azapi_resource.mysql.name
   charset             = "utf8mb4"
   collation           = "utf8mb4_0900_ai_ci"
@@ -168,7 +149,7 @@ resource "azurerm_mysql_flexible_database" "schema" {
 resource "azurerm_container_app_environment" "env" {
   name                       = "cae-${local.base}"
   location                   = var.location
-  resource_group_name        = azurerm_resource_group.rg.name
+  resource_group_name        = data.azurerm_resource_group.rg.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.logs.id
   tags                       = var.tags
 }
@@ -182,24 +163,24 @@ resource "azurerm_container_app" "service" {
 
   name                         = each.key
   container_app_environment_id = azurerm_container_app_environment.env.id
-  resource_group_name          = azurerm_resource_group.rg.name
+  resource_group_name          = data.azurerm_resource_group.rg.name
   revision_mode                = "Single"
   tags                         = var.tags
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.apps.id]
+    identity_ids = [data.azurerm_user_assigned_identity.apps.id]
   }
 
   registry {
     server   = azurerm_container_registry.acr.login_server
-    identity = azurerm_user_assigned_identity.apps.id
+    identity = data.azurerm_user_assigned_identity.apps.id
   }
 
   secret {
     name                = "db-password"
     key_vault_secret_id = azurerm_key_vault_secret.mysql_password.versionless_id
-    identity            = azurerm_user_assigned_identity.apps.id
+    identity            = data.azurerm_user_assigned_identity.apps.id
   }
 
   ingress {
@@ -259,11 +240,7 @@ resource "azurerm_container_app" "service" {
     }
   }
 
-  depends_on = [
-    azurerm_role_assignment.apps_acr_pull,
-    azurerm_role_assignment.apps_kv_secrets,
-    azurerm_mysql_flexible_database.schema,
-  ]
+  depends_on = [azurerm_mysql_flexible_database.schema]
 }
 
 resource "azurerm_container_app" "gateway" {
@@ -271,18 +248,18 @@ resource "azurerm_container_app" "gateway" {
 
   name                         = "api-gateway"
   container_app_environment_id = azurerm_container_app_environment.env.id
-  resource_group_name          = azurerm_resource_group.rg.name
+  resource_group_name          = data.azurerm_resource_group.rg.name
   revision_mode                = "Single"
   tags                         = var.tags
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.apps.id]
+    identity_ids = [data.azurerm_user_assigned_identity.apps.id]
   }
 
   registry {
     server   = azurerm_container_registry.acr.login_server
-    identity = azurerm_user_assigned_identity.apps.id
+    identity = data.azurerm_user_assigned_identity.apps.id
   }
 
   ingress {
@@ -327,8 +304,6 @@ resource "azurerm_container_app" "gateway" {
       }
     }
   }
-
-  depends_on = [azurerm_role_assignment.apps_acr_pull]
 }
 
 resource "azurerm_container_app" "web" {
@@ -336,18 +311,18 @@ resource "azurerm_container_app" "web" {
 
   name                         = "web"
   container_app_environment_id = azurerm_container_app_environment.env.id
-  resource_group_name          = azurerm_resource_group.rg.name
+  resource_group_name          = data.azurerm_resource_group.rg.name
   revision_mode                = "Single"
   tags                         = var.tags
 
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.apps.id]
+    identity_ids = [data.azurerm_user_assigned_identity.apps.id]
   }
 
   registry {
     server   = azurerm_container_registry.acr.login_server
-    identity = azurerm_user_assigned_identity.apps.id
+    identity = data.azurerm_user_assigned_identity.apps.id
   }
 
   ingress {
@@ -382,8 +357,6 @@ resource "azurerm_container_app" "web" {
       }
     }
   }
-
-  depends_on = [azurerm_role_assignment.apps_acr_pull]
 }
 
 # ---------------------------------------------------------------------------
@@ -393,7 +366,7 @@ resource "azurerm_container_app" "web" {
 resource "azurerm_consumption_budget_resource_group" "budget" {
   count             = length(var.budget_alert_emails) > 0 ? 1 : 0
   name              = "budget-${local.base}"
-  resource_group_id = azurerm_resource_group.rg.id
+  resource_group_id = data.azurerm_resource_group.rg.id
   amount            = var.monthly_budget_usd
   time_grain        = "Monthly"
 
@@ -403,7 +376,21 @@ resource "azurerm_consumption_budget_resource_group" "budget" {
 
   notification {
     enabled        = true
-    threshold      = 80
+    threshold      = 50
+    operator       = "GreaterThan"
+    contact_emails = var.budget_alert_emails
+  }
+
+  notification {
+    enabled        = true
+    threshold      = 75
+    operator       = "GreaterThan"
+    contact_emails = var.budget_alert_emails
+  }
+
+  notification {
+    enabled        = true
+    threshold      = 90
     operator       = "GreaterThan"
     contact_emails = var.budget_alert_emails
   }
@@ -411,7 +398,6 @@ resource "azurerm_consumption_budget_resource_group" "budget" {
   notification {
     enabled        = true
     threshold      = 100
-    threshold_type = "Forecasted"
     operator       = "GreaterThan"
     contact_emails = var.budget_alert_emails
   }

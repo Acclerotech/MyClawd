@@ -43,19 +43,19 @@ az ad app federated-credential create --id $APP_ID --parameters '{
 }'
 ```
 
-## 3. Permissions
+## 3. Resource group, app identity and permissions
 
-The deploy identity creates resources **and** role assignments (AcrPull, Key Vault roles), so it needs both:
+The bootstrap script creates `rg-myclawd-devqa` and the apps' managed identity `id-myclawd-devqa-apps`, then grants:
 
-```bash
-az role assignment create --assignee $APP_ID --role Contributor --scope /subscriptions/$SUB
-az role assignment create --assignee $APP_ID --role "Role Based Access Control Administrator" \
-  --scope /subscriptions/$SUB
-az role assignment create --assignee $APP_ID --role "Storage Blob Data Contributor" \
-  --scope $(az storage account show -n stmyclawdtfstate<unique> --query id -o tsv)
-```
+| Who | Role | Scope |
+| --- | --- | --- |
+| deploy identity | Contributor | subscription |
+| deploy identity | Storage Blob Data Contributor | Terraform state storage account |
+| deploy identity | Key Vault Secrets Officer | `rg-myclawd-devqa` |
+| apps identity | AcrPull | `rg-myclawd-devqa` |
+| apps identity | Key Vault Secrets User | `rg-myclawd-devqa` |
 
-Scope these to a dedicated resource group instead of the subscription if your policy requires it (create `rg-myclawd-devqa` first and add `import` for it in Terraform).
+Terraform does not create role assignments, so the deploy identity never needs Owner, User Access Administrator or Role Based Access Control Administrator. This also works when the subscription Owner's own role carries Azure's condition that blocks granting privileged roles.
 
 ## 4. GitHub
 
